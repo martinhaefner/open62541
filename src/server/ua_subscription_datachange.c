@@ -290,10 +290,10 @@ static UA_Boolean
 detectValueChangeWithFilter(UA_MonitoredItem *mon, UA_DataValue *value,
                             UA_ByteString *encoding) {
     if (isDataTypeNumeric(value->value.type)
-            && (mon->filter.trigger == UA_DATACHANGETRIGGER_STATUSVALUE
-                || mon->filter.trigger == UA_DATACHANGETRIGGER_STATUSVALUETIMESTAMP)) {
-        if (mon->filter.deadbandType == UA_DEADBANDTYPE_ABSOLUTE) {
-            if (!updateNeededForFilteredValue(&value->value, &mon->lastValue, mon->filter.deadbandValue))
+            && (mon->filter.dataChangeFilter.trigger == UA_DATACHANGETRIGGER_STATUSVALUE
+                || mon->filter.dataChangeFilter.trigger == UA_DATACHANGETRIGGER_STATUSVALUETIMESTAMP)) {
+        if (mon->filter.dataChangeFilter.deadbandType == UA_DEADBANDTYPE_ABSOLUTE) {
+            if (!updateNeededForFilteredValue(&value->value, &mon->lastValue, mon->filter.dataChangeFilter.deadbandValue))
                 return false;
         } /*else if (mon->filter.deadbandType == UA_DEADBANDTYPE_PERCENT) {
             // TODO where do this EURange come from ?
@@ -332,7 +332,7 @@ static UA_Boolean
 detectValueChange(UA_MonitoredItem *mon, UA_DataValue *value, UA_ByteString *encoding) {
     /* Apply Filter */
     UA_Boolean hasValue = value->hasValue;
-    if(mon->filter.trigger == UA_DATACHANGETRIGGER_STATUS)
+    if(mon->filter.dataChangeFilter.trigger == UA_DATACHANGETRIGGER_STATUS)
         value->hasValue = false;
 
     UA_Boolean hasServerTimestamp = value->hasServerTimestamp;
@@ -342,7 +342,7 @@ detectValueChange(UA_MonitoredItem *mon, UA_DataValue *value, UA_ByteString *enc
 
     UA_Boolean hasSourceTimestamp = value->hasSourceTimestamp;
     UA_Boolean hasSourcePicoseconds = value->hasSourcePicoseconds;
-    if(mon->filter.trigger < UA_DATACHANGETRIGGER_STATUSVALUETIMESTAMP) {
+    if(mon->filter.dataChangeFilter.trigger < UA_DATACHANGETRIGGER_STATUSVALUETIMESTAMP) {
         value->hasSourceTimestamp = false;
         value->hasSourcePicoseconds = false;
     }
