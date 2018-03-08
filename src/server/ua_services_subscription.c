@@ -231,10 +231,10 @@ setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
 
 static const UA_String binaryEncoding = {sizeof("Default Binary") - 1, (UA_Byte *)"Default Binary"};
 
-#ifdef UA_ENABLE_EVENTS
+#ifdef UA_ENABLE_SUBSCRIPTIONS_EVENTS
 static UA_StatusCode UA_Server_addMonitoredItemToNodeEditNodeCallback(UA_Server *server, UA_Session *session,
                                                                       UA_Node *node, void *data) {
-    LIST_INSERT_HEAD(&((UA_ObjectNode *)node)->monitoredItemQueue, (UA_MonitoredItemQueueEntry *)data, listEntry);
+    SLIST_INSERT_HEAD(&((UA_ObjectNode *)node)->monitoredItemQueue, (UA_MonitoredItemQueueEntry *)data, next);
     return UA_STATUSCODE_GOOD;
 }
 #endif
@@ -324,7 +324,7 @@ Operation_CreateMonitoredItem(UA_Server *server, UA_Session *session, struct cre
     }
 
     UA_Subscription_addMonitoredItem(cmc->sub, newMon);
-#ifdef UA_ENABLE_EVENTS
+#ifdef UA_ENABLE_SUBSCRIPTIONS_EVENTS
     if (newMon->monitoredItemType == UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
         /* insert the monitored item into the node's queue */
         UA_MonitoredItemQueueEntry *entry = (UA_MonitoredItemQueueEntry *) UA_malloc(sizeof(UA_MonitoredItemQueueEntry));
@@ -457,7 +457,8 @@ Operation_SetMonitoringMode(UA_Server *server, UA_Session *session,
         return;
     }
 
-    if(mon->monitoredItemType == UA_MONITOREDITEMTYPE_STATUSNOTIFY) {
+    if(mon->monitoredItemType != UA_MONITOREDITEMTYPE_CHANGENOTIFY
+           && mon->monitoredItemType != UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
         *result = UA_STATUSCODE_BADNOTIMPLEMENTED;
         return;
     }
