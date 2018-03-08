@@ -10,13 +10,14 @@
 #include "ua_subscription.h"
 #include "ua_server_internal.h"
 #include "ua_types_encoding_binary.h"
+#include "ua_subscription_events.h"
 
 #ifdef UA_ENABLE_SUBSCRIPTIONS /* conditional compilation */
 
 #define UA_VALUENCODING_MAXSTACK 512
 
 UA_MonitoredItem *
-UA_MonitoredItem_new(UA_MonitoredItemType monType) {
+UA_MonitoredItem_new() {
     /* Allocate the memory */
     UA_MonitoredItem *newItem =
             (UA_MonitoredItem *) UA_calloc(1, sizeof(UA_MonitoredItem));
@@ -24,11 +25,25 @@ UA_MonitoredItem_new(UA_MonitoredItemType monType) {
         return NULL;
 
     /* Remaining members are covered by calloc zeroing out the memory */
-    newItem->monitoredItemType = monType; /* currently hardcoded */
     newItem->timestampsToReturn = UA_TIMESTAMPSTORETURN_SOURCE;
     TAILQ_INIT(&newItem->queue);
     return newItem;
 }
+
+#ifdef UA_ENABLE_EVENTS
+static UA_StatusCode removeMonitoredItemFromNodeCallback(UA_Server *server, UA_Session *session, UA_Node *node,
+                                                         void *data) {
+    /* data is the monitoredItemID */
+    UA_MonitoredItemQueueEntry *entry, *tmp_entry;
+    LIST_FOREACH_SAFE(entry, &((UA_ObjectNode *) node)->monitoredItemQueue, listEntry, tmp_entry) {
+        if (entry->mon->monitoredItemId == *(UA_UInt32 *)data) {
+            LIST_REMOVE(entry, listEntry);
+            UA_free(entry);
+        }
+    }
+    return UA_STATUSCODE_GOOD;
+}
+#endif
 
 void
 MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem) {
@@ -38,28 +53,37 @@ MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem) {
                         "Delete the MonitoredItem", sub->subscriptionId,
                         monitoredItem->monitoredItemId);
 
-    if(monitoredItem->monitoredItemType == UA_MONITOREDITEMTYPE_CHANGENOTIFY) {
-        /* Remove the sampling callback */
-        MonitoredItem_unregisterSampleCallback(server, monitoredItem);
+    /* Remove the sampling callback */
+    MonitoredItem_unregisterSampleCallback(server, monitoredItem);
 
-        /* Clear the queued notifications */
-        UA_Notification *notification, *notification_tmp;
-        TAILQ_FOREACH_SAFE(notification, &monitoredItem->queue, listEntry, notification_tmp) {
-            /* Remove the item from the queues */
-            TAILQ_REMOVE(&monitoredItem->queue, notification, listEntry);
-            TAILQ_REMOVE(&sub->notificationQueue, notification, globalEntry);
-            --sub->notificationQueueSize;
+    /* Clear the queued notifications */
+    UA_Notification *notification, *notification_tmp;
+    TAILQ_FOREACH_SAFE(notification, &monitoredItem->queue, listEntry, notification_tmp) {
+        /* Remove the item from the queues */
+        TAILQ_REMOVE(&monitoredItem->queue, notification, listEntry);
+        TAILQ_REMOVE(&sub->notificationQueue, notification, globalEntry);
+        --sub->notificationQueueSize;
 
+        if (monitoredItem->monitoredItemType == UA_MONITOREDITEMTYPE_CHANGENOTIFY) {
             UA_DataValue_deleteMembers(&notification->data.value);
-            UA_free(notification);
+        } else if (monitoredItem->monitoredItemType == UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
+            UA_EventFieldList_delete(notification->data.event->fields);
+            /* EventFilterResult currently isn't being used
+            UA_EventFilterResult_delete(notification->data.event->result); */
+            UA_free(notification->data.event);
         }
+        UA_free(notification);
         monitoredItem->queueSize = 0;
-    } else {
-        /* TODO: Access val data.event */
-        UA_LOG_ERROR(server->config.logger, UA_LOGCATEGORY_SERVER,
-                     "MonitoredItemTypes other than ChangeNotify are not supported yet");
     }
-
+#ifdef UA_ENABLE_EVENTS
+    if (monitoredItem->monitoredItemType == UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
+        /* Remove the monitored item from the node queue */
+        UA_Server_editNode(server, NULL, &monitoredItem->monitoredNodeId, removeMonitoredItemFromNodeCallback,
+                           &monitoredItem->monitoredItemId);
+        /* Delete the event filter */
+        UA_EventFilter_delete(monitoredItem->filter.eventFilter);
+    }
+#endif
     /* Remove the monitored item */
     UA_String_deleteMembers(&monitoredItem->indexRange);
     UA_ByteString_deleteMembers(&monitoredItem->lastSampledValue);
@@ -68,9 +92,9 @@ MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem) {
     UA_Server_delayedFree(server, monitoredItem);
 }
 
-void MonitoredItem_ensureQueueSpace(UA_MonitoredItem *mon) {
+UA_StatusCode MonitoredItem_ensureQueueSpace(UA_Server *server, UA_MonitoredItem *mon) {
     if(mon->queueSize <= mon->maxQueueSize)
-        return;
+        return UA_STATUSCODE_GOOD;
 
     /* Remove notifications until the queue size is reached */
     UA_Subscription *sub = mon->subscription;
@@ -106,14 +130,76 @@ void MonitoredItem_ensureQueueSpace(UA_MonitoredItem *mon) {
         /* Remove the notification from the queues */
         TAILQ_REMOVE(&mon->queue, del, listEntry);
         TAILQ_REMOVE(&sub->notificationQueue, del, globalEntry);
+#ifdef UA_ENABLE_EVENTS
+        /* TODO: provide additional protection for overflowEvents according to specification */
+        /* removing an overflowEvent should not reduce the queueSize */
+        UA_NodeId overflowId = UA_NODEID_NUMERIC(0, UA_NS0ID_SIMPLEOVERFLOWEVENTTYPE);
+        if (!(del->data.event->fields->eventFieldsSize == 1
+              && del->data.event->fields->eventFields->type == &UA_TYPES[UA_TYPES_NODEID]
+              && UA_NodeId_equal((UA_NodeId *)del->data.event->fields->eventFields->data, &overflowId))) {
+            --mon->queueSize;
+            --sub->notificationQueueSize;
+        }
+#else
         --mon->queueSize;
         --sub->notificationQueueSize;
+#endif
 
         /* Free the notification */
         if(mon->monitoredItemType == UA_MONITOREDITEMTYPE_CHANGENOTIFY) {
             UA_DataValue_deleteMembers(&del->data.value);
-        } else {
-            /* TODO: event implemantation */
+        } else if (mon->monitoredItemType == UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
+#ifdef UA_ENABLE_EVENTS
+            /* EventFilterResult currently isn't being used
+            UA_EventFilterResult_delete(del->data.event->result); */
+            UA_EventFieldList_delete(del->data.event->fields);
+            UA_free(del->data.event);
+
+            /* cause an overflowEvent */
+            /* an overflowEvent does not care about event filters and as such will not be "triggered" correctly.
+             * Instead, a notification will be inserted into the queue which includes only the nodeId of the
+             * overflowEventType. It is up to the client to check for possible overflows.
+             */
+            UA_Notification *overflowNotification = (UA_Notification *) UA_malloc(sizeof(UA_Notification));
+            if (!overflowNotification) {
+                return UA_STATUSCODE_BADOUTOFMEMORY;
+            }
+
+            overflowNotification->data.event = (UA_EventNotification *) UA_malloc(sizeof(UA_EventNotification));
+            if (!overflowNotification->data.event) {
+                UA_free(overflowNotification);
+                return UA_STATUSCODE_BADOUTOFMEMORY;
+            }
+
+            overflowNotification->data.event->fields = UA_EventFieldList_new();
+            if (!overflowNotification->data.event->fields) {
+                UA_free(overflowNotification->data.event);
+                UA_free(overflowNotification);
+                return UA_STATUSCODE_BADOUTOFMEMORY;
+            }
+            UA_EventFieldList_init(overflowNotification->data.event->fields);
+
+            overflowNotification->data.event->fields->eventFields = UA_Variant_new();
+            if (!overflowNotification->data.event->fields->eventFields) {
+                UA_free(overflowNotification->data.event->fields);
+                UA_free(overflowNotification->data.event);
+                UA_free(overflowNotification);
+                return UA_STATUSCODE_BADOUTOFMEMORY;
+            }
+            UA_Variant_init(overflowNotification->data.event->fields->eventFields);
+
+            overflowNotification->data.event->fields->eventFieldsSize = 1;
+            UA_Variant_setScalarCopy(overflowNotification->data.event->fields->eventFields,
+                                              &overflowId, &UA_TYPES[UA_TYPES_NODEID]);
+            overflowNotification->mon = mon;
+            if (mon->discardOldest) {
+                TAILQ_INSERT_HEAD(&mon->queue, overflowNotification, listEntry);
+                TAILQ_INSERT_HEAD(&mon->subscription->notificationQueue, overflowNotification, globalEntry);
+            } else {
+                TAILQ_INSERT_TAIL(&mon->queue, overflowNotification, listEntry);
+                TAILQ_INSERT_TAIL(&mon->subscription->notificationQueue, overflowNotification, globalEntry);
+            }
+#endif
         }
 
         /* Work around a false positive in clang analyzer */
@@ -144,6 +230,7 @@ void MonitoredItem_ensureQueueSpace(UA_MonitoredItem *mon) {
     }
 
     /* TODO: Infobits for Events? */
+    return UA_STATUSCODE_GOOD;
 }
 
 #define ABS_SUBTRACT_TYPE_INDEPENDENT(a,b) ((a)>(b)?(a)-(b):(b)-(a))
@@ -364,7 +451,7 @@ sampleCallbackWithValue(UA_Server *server, UA_Subscription *sub,
     ++sub->notificationQueueSize;
 
     /* Remove some notifications if the queue is beyond maximum capacity */
-    MonitoredItem_ensureQueueSpace(monitoredItem);
+    MonitoredItem_ensureQueueSpace(server, monitoredItem);
 
     return true;
 }

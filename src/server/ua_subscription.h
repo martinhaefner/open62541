@@ -41,13 +41,15 @@ typedef enum {
     UA_MONITOREDITEMTYPE_EVENTNOTIFY = 4
 } UA_MonitoredItemType;
 
-/* Not used yet. Placeholder for a future event implementation. */
-typedef struct UA_Event {
-   UA_Int32 eventId;
-} UA_Event;
 
 struct UA_MonitoredItem;
 typedef struct UA_MonitoredItem UA_MonitoredItem;
+
+typedef struct UA_EventNotification {
+    UA_EventFieldList *fields;
+    /* EventFilterResult currently isn't being used
+    UA_EventFilterResult *result; */
+} UA_EventNotification;
 
 typedef struct UA_Notification {
     TAILQ_ENTRY(UA_Notification) listEntry;
@@ -57,7 +59,7 @@ typedef struct UA_Notification {
 
     /* See the monitoredItemType of the MonitoredItem */
     union {
-        UA_Event event;
+        UA_EventNotification *event;
         UA_DataValue value;
     } data;
 } UA_Notification;
@@ -81,7 +83,10 @@ struct UA_MonitoredItem {
     UA_UInt32 maxQueueSize;
     UA_Boolean discardOldest;
     // TODO: dataEncoding is hardcoded to UA binary
-    UA_DataChangeFilter filter;
+    union {
+        UA_EventFilter *eventFilter;
+        UA_DataChangeTrigger trigger;
+    } filter;
     UA_Variant lastValue;
 
     /* Sample Callback */
@@ -94,7 +99,7 @@ struct UA_MonitoredItem {
     UA_UInt32 queueSize;
 };
 
-UA_MonitoredItem * UA_MonitoredItem_new(UA_MonitoredItemType);
+UA_MonitoredItem * UA_MonitoredItem_new(void);
 void MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem);
 void UA_MonitoredItem_SampleCallback(UA_Server *server, UA_MonitoredItem *monitoredItem);
 UA_StatusCode MonitoredItem_registerSampleCallback(UA_Server *server, UA_MonitoredItem *mon);
@@ -102,7 +107,7 @@ UA_StatusCode MonitoredItem_unregisterSampleCallback(UA_Server *server, UA_Monit
 
 /* Remove entries until mon->maxQueueSize is reached. Sets infobits for lost
  * data if required. */
-void MonitoredItem_ensureQueueSpace(UA_MonitoredItem *mon);
+UA_StatusCode MonitoredItem_ensureQueueSpace(UA_Server *server, UA_MonitoredItem *mon);
 
 /****************/
 /* Subscription */

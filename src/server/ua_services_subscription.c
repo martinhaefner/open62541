@@ -192,6 +192,7 @@ setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
     /* SamplingInterval */
     UA_Double samplingInterval = params->samplingInterval;
     if(mon->attributeId == UA_ATTRIBUTEID_VALUE) {
+        mon->monitoredItemType = UA_MONITOREDITEMTYPE_CHANGENOTIFY;
         const UA_VariableNode *vn = (const UA_VariableNode *)
             UA_Nodestore_get(server, &mon->monitoredNodeId);
         if(vn) {
@@ -203,6 +204,9 @@ setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
     } else if(mon->attributeId == UA_ATTRIBUTEID_EVENTNOTIFIER) {
         /* TODO: events should not need a samplinginterval */
         samplingInterval = 10000.0f; // 10 seconds to reduce the load
+        mon->monitoredItemType = UA_MONITOREDITEMTYPE_EVENTNOTIFY;
+    } else {
+        mon->monitoredItemType = UA_MONITOREDITEMTYPE_CHANGENOTIFY;
     }
     mon->samplingInterval = samplingInterval;
     UA_BOUNDEDVALUE_SETWBOUNDS(server->config.samplingIntervalLimits,
@@ -225,6 +229,14 @@ setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
 }
 
 static const UA_String binaryEncoding = {sizeof("Default Binary") - 1, (UA_Byte *)"Default Binary"};
+
+#ifdef UA_ENABLE_EVENTS
+static UA_StatusCode UA_Server_addMonitoredItemToNodeEditNodeCallback(UA_Server *server, UA_Session *session,
+                                                                      UA_Node *node, void *data) {
+    LIST_INSERT_HEAD(&((UA_ObjectNode *)node)->monitoredItemQueue, (UA_MonitoredItemQueueEntry *)data, listEntry);
+    return UA_STATUSCODE_GOOD;
+}
+#endif
 
 /* Thread-local variables to pass additional arguments into the operation */
 struct createMonContext {
@@ -278,7 +290,8 @@ Operation_CreateMonitoredItem(UA_Server *server, UA_Session *session, struct cre
     }
 
     /* Create the monitoreditem */
-    UA_MonitoredItem *newMon = UA_MonitoredItem_new(UA_MONITOREDITEMTYPE_CHANGENOTIFY);
+    UA_MonitoredItem *newMon = UA_MonitoredItem_new();
+
     if(!newMon) {
         result->statusCode = UA_STATUSCODE_BADOUTOFMEMORY;
         UA_DataValue_deleteMembers(&v);
@@ -310,6 +323,19 @@ Operation_CreateMonitoredItem(UA_Server *server, UA_Session *session, struct cre
     }
 
     UA_Subscription_addMonitoredItem(cmc->sub, newMon);
+#ifdef UA_ENABLE_EVENTS
+    if (newMon->monitoredItemType == UA_MONITOREDITEMTYPE_EVENTNOTIFY) {
+        /* insert the monitored item into the node's queue */
+        UA_MonitoredItemQueueEntry *entry = (UA_MonitoredItemQueueEntry *) UA_malloc(sizeof(UA_MonitoredItemQueueEntry));
+        if (!entry) {
+            result->statusCode = UA_STATUSCODE_BADOUTOFMEMORY;
+            return;
+        }
+        entry->mon = newMon;
+        UA_Server_editNode(server, NULL, &newMon->monitoredNodeId, UA_Server_addMonitoredItemToNodeEditNodeCallback,
+                           entry);
+    }
+#endif
 
     /* Create the first sample */
     if(request->monitoringMode == UA_MONITORINGMODE_REPORTING)
@@ -378,7 +404,7 @@ Operation_ModifyMonitoredItem(UA_Server *server, UA_Session *session, UA_Subscri
     result->revisedQueueSize = mon->maxQueueSize;
 
     /* Remove some notifications if the queue is now too small */
-    MonitoredItem_ensureQueueSpace(mon);
+    MonitoredItem_ensureQueueSpace(server, mon);
 }
 
 void
@@ -430,7 +456,7 @@ Operation_SetMonitoringMode(UA_Server *server, UA_Session *session,
         return;
     }
 
-    if(mon->monitoredItemType != UA_MONITOREDITEMTYPE_CHANGENOTIFY) {
+    if(mon->monitoredItemType == UA_MONITOREDITEMTYPE_STATUSNOTIFY) {
         *result = UA_STATUSCODE_BADNOTIMPLEMENTED;
         return;
     }
