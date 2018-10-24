@@ -115,3 +115,10 @@ UtcTime
 LocaleId
 RedundancySupport
 ServerDiagnosticsSummaryDataType
+Range
+EUInformation
+BaseEventType
+TimeZoneDataType
+HasEventSource
+GeneratesEvent
+EventQueueOverflowEventType
