@@ -174,6 +174,10 @@ struct UA_ServerNetworkLayer {
     UA_StatusCode (*listen)(UA_ServerNetworkLayer *nl, UA_Server *server,
                             UA_UInt16 timeout);
 
+    int (*register_fds)(UA_ServerNetworkLayer *nl, UA_Server *server, fd_set* readfds, fd_set* writefds);
+
+    UA_StatusCode (*check_fds)(UA_ServerNetworkLayer *nl, UA_Server *server, fd_set* readfds, fd_set* writefds);
+
     /* Close the network socket and all open connections. Afterwards, the
      * network layer can be safely deleted.
      *

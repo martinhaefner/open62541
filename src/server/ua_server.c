@@ -494,10 +494,33 @@ UA_Server_run_iterate(UA_Server *server, UA_Boolean waitInternal) {
     if(waitInternal)
         timeout = (UA_UInt16)(((nextRepeated - now) + (UA_DATETIME_MSEC - 1)) / UA_DATETIME_MSEC);
 
+    fd_set read_fds;
+    fd_set write_fds;
+    int max_fd = -1;
+
+    FD_ZERO(&read_fds);
+    FD_ZERO(&write_fds);
+
     /* Listen on the networklayer */
-    for(size_t i = 0; i < server->config.networkLayersSize; ++i) {
+    for(size_t i = 0; i < server->config.networkLayersSize; ++i)
+    {
         UA_ServerNetworkLayer *nl = &server->config.networkLayers[i];
-        nl->listen(nl, server, timeout);
+
+        int max = nl->register_fds(nl, server, &read_fds, &write_fds);
+        if (max > max_fd)
+            max_fd = max;
+    }
+
+    struct timeval tmptv = {0, timeout * 1000};
+    int rc = select(max_fd + 1, &read_fds, &write_fds, NULL, &tmptv);
+
+    if (rc > 0)
+    {
+        for(size_t i = 0; i < server->config.networkLayersSize; ++i)
+        {
+            UA_ServerNetworkLayer *nl = &server->config.networkLayers[i];
+            nl->check_fds(nl, server, &read_fds, &write_fds);
+        }
     }
 
 #if defined(UA_ENABLE_DISCOVERY_MULTICAST) && !defined(UA_ENABLE_MULTITHREADING)

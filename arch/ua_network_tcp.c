@@ -476,6 +476,96 @@ ServerNetworkLayerTCP_listen(UA_ServerNetworkLayer *nl, UA_Server *server,
     return UA_STATUSCODE_GOOD;
 }
 
+static
+int ServerNetworkLayerTCP_register_fds(UA_ServerNetworkLayer *nl, UA_Server *server, fd_set* readfds, fd_set* writefds)
+{
+    // we currently don't handle write events
+    (void)writefds;
+
+    /* Every open socket can generate two jobs */
+    ServerNetworkLayerTCP *layer = (ServerNetworkLayerTCP *)nl->handle;
+
+    if (layer->serverSocketsSize == 0)
+        return -1;
+
+    /* Listen on open sockets (including the server) */
+    return setFDSet(layer, readfds);
+}
+
+static
+UA_StatusCode ServerNetworkLayerTCP_check_fds(UA_ServerNetworkLayer *nl, UA_Server *server, fd_set* readfds, fd_set* writefds)
+{
+    // we currently don't handle write events
+    (void)writefds;
+
+    // we currently don't handle error events
+    fd_set errset;
+    FD_ZERO(&errset);
+
+    /* Every open socket can generate two jobs */
+    ServerNetworkLayerTCP *layer = (ServerNetworkLayerTCP *)nl->handle;
+
+    /* Accept new connections via the server sockets */
+    for(UA_UInt16 i = 0; i < layer->serverSocketsSize; i++) {
+        if(!UA_fd_isset(layer->serverSockets[i], readfds))
+            continue;
+
+        struct sockaddr_storage remote;
+        socklen_t remote_size = sizeof(remote);
+        UA_SOCKET newsockfd = UA_accept((UA_SOCKET)layer->serverSockets[i],
+                                  (struct sockaddr*)&remote, &remote_size);
+        if(newsockfd == UA_INVALID_SOCKET)
+            continue;
+
+        UA_LOG_TRACE(layer->logger, UA_LOGCATEGORY_NETWORK,
+                    "Connection %i | New TCP connection on server socket %i",
+                    (int)newsockfd, layer->serverSockets[i]);
+
+        ServerNetworkLayerTCP_add(nl, layer, (UA_Int32)newsockfd, &remote);
+    }
+
+    /* Read from established sockets */
+    ConnectionEntry *e, *e_tmp;
+    UA_DateTime now = UA_DateTime_nowMonotonic();
+    LIST_FOREACH_SAFE(e, &layer->connections, pointers, e_tmp) {
+        if ((e->connection.state == UA_CONNECTION_OPENING) &&
+            (now > (e->connection.openingDate + (NOHELLOTIMEOUT * UA_DATETIME_MSEC)))){
+            UA_LOG_INFO(layer->logger, UA_LOGCATEGORY_NETWORK,
+                        "Connection %i | Closed by the server (no Hello Message)",
+                         e->connection.sockfd);
+            LIST_REMOVE(e, pointers);
+            UA_close(e->connection.sockfd);
+            UA_Server_removeConnection(server, &e->connection);
+            continue;
+        }
+
+        if(!UA_fd_isset(e->connection.sockfd, &errset) &&
+           !UA_fd_isset(e->connection.sockfd, readfds))
+          continue;
+
+        UA_LOG_TRACE(layer->logger, UA_LOGCATEGORY_NETWORK,
+                    "Connection %i | Activity on the socket",
+                    e->connection.sockfd);
+
+        UA_ByteString buf = UA_BYTESTRING_NULL;
+        UA_StatusCode retval = connection_recv(&e->connection, &buf, 0);
+
+        if(retval == UA_STATUSCODE_GOOD) {
+            /* Process packets */
+            UA_Server_processBinaryMessage(server, &e->connection, &buf);
+            connection_releaserecvbuffer(&e->connection, &buf);
+        } else if(retval == UA_STATUSCODE_BADCONNECTIONCLOSED) {
+            /* The socket is shutdown but not closed */
+            UA_LOG_INFO(layer->logger, UA_LOGCATEGORY_NETWORK,
+                        "Connection %i | Closed",
+                        e->connection.sockfd);
+            LIST_REMOVE(e, pointers);
+            UA_close(e->connection.sockfd);
+            UA_Server_removeConnection(server, &e->connection);
+        }
+    }
+    return UA_STATUSCODE_GOOD;
+}
 static void
 ServerNetworkLayerTCP_stop(UA_ServerNetworkLayer *nl, UA_Server *server) {
     ServerNetworkLayerTCP *layer = (ServerNetworkLayerTCP *)nl->handle;
@@ -536,6 +626,8 @@ UA_ServerNetworkLayerTCP(UA_ConnectionConfig config, UA_UInt16 port, UA_Logger l
     nl.localConnectionConfig = config;
     nl.start = ServerNetworkLayerTCP_start;
     nl.listen = ServerNetworkLayerTCP_listen;
+    nl.register_fds = ServerNetworkLayerTCP_register_fds;
+    nl.check_fds = ServerNetworkLayerTCP_check_fds;
     nl.stop = ServerNetworkLayerTCP_stop;
     nl.deleteMembers = ServerNetworkLayerTCP_deleteMembers;
     return nl;
