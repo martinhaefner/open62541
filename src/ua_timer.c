@@ -97,7 +97,8 @@ UA_Timer_addRepeatedCallback(UA_Timer *t, UA_ApplicationCallback callback,
         return UA_STATUSCODE_BADINTERNALERROR;
 
     /* The interval needs to be at least 5ms */
-    if(interval < 5)
+    /* mhaefner 20.02.2018: this seems to be an artificial boundary, reduced to 3 */
+    if(interval < 3)
         return UA_STATUSCODE_BADINTERNALERROR;
 
     /* Allocate the repeated callback structure */
