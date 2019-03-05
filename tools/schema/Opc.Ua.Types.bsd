@@ -15,6 +15,10 @@
     <opc:Field Name="Value" TypeName="opc:Char" LengthField="Length" />
   </opc:StructuredType>
 
+  <opc:OpaqueType Name="Counter">
+    <opc:Documentation>A monotonically increasing value.</opc:Documentation>
+  </opc:OpaqueType>
+
   <opc:EnumeratedType Name="NodeIdType" LengthInBits="6">
     <opc:Documentation>The possible encodings for a NodeId value.</opc:Documentation>
     <opc:EnumeratedValue Name="TwoByte" Value="0" />
@@ -187,7 +191,7 @@
     <opc:EnumeratedValue Name="Optional" Value="2" />
     <opc:EnumeratedValue Name="Constraint" Value="3" />
   </opc:EnumeratedType>
-    
+
 
   <opc:OpaqueType Name="ImageBMP">
     <opc:Documentation>An image encoded in BMP format.</opc:Documentation>

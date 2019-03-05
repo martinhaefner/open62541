@@ -122,3 +122,4 @@ TimeZoneDataType
 HasEventSource
 GeneratesEvent
 EventQueueOverflowEventType
+Counter

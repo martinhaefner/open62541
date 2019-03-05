@@ -695,6 +695,24 @@
       <Field Name="Description" DataType="i=21" />
     </Definition>
   </UADataType>
+  <UAObject NodeId="i=889" BrowseName="Default Binary" SymbolicName="DefaultBinary">
+    <DisplayName>Default Binary</DisplayName>
+    <References>
+      <Reference ReferenceType="HasEncoding" IsForward="false">i=887</Reference>
+      <Reference ReferenceType="HasDescription">i=8241</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=76</Reference>
+    </References>
+  </UAObject>
+  <UAVariable NodeId="i=8241" BrowseName="EUInformation" ParentNodeId="i=7617" DataType="String">
+    <DisplayName>EUInformation</DisplayName>
+    <References>
+      <Reference ReferenceType="HasTypeDefinition">i=69</Reference>
+      <Reference ReferenceType="HasComponent" IsForward="false">i=7617</Reference>
+    </References>
+    <Value>
+      <String xmlns="http://opcfoundation.org/UA/2008/02/Types.xsd">EUInformation</String>
+    </Value>
+  </UAVariable>
   <UAVariable NodeId="i=12169" BrowseName="EnumValues" ParentNodeId="i=120" DataType="i=7594" ValueRank="1">
     <DisplayName>EnumValues</DisplayName>
     <References>
@@ -1904,6 +1922,21 @@
       <Reference ReferenceType="HasSubtype" IsForward="false">i=58</Reference>
     </References>
   </UAObjectType>
+  <UADataType NodeId="i=289" BrowseName="Counter">
+    <DisplayName>Counter</DisplayName>
+    <Description>A monotonically increasing value.</Description>
+    <References>
+      <Reference ReferenceType="HasSubtype" IsForward="false">i=7</Reference>
+    </References>
+  </UADataType>
+    <UAReferenceType NodeId="i=117" BrowseName="HasSubStateMachine">
+    <DisplayName>HasSubStateMachine</DisplayName>
+    <Description>The type for a reference to a substate for a state.</Description>
+    <References>
+      <Reference ReferenceType="HasSubtype" IsForward="false">i=32</Reference>
+    </References>
+    <InverseName>SubStateMachineOf</InverseName>
+  </UAReferenceType>
   <UAVariableType NodeId="i=2365" BrowseName="DataItemType" ValueRank="-2">
     <DisplayName>DataItemType</DisplayName>
     <Description>A variable that contains live automation data.</Description>
@@ -2215,5 +2248,5 @@
     <Value>
       <String xmlns="http://opcfoundation.org/UA/2008/02/Types.xsd">EnumValueType</String>
     </Value>
-  </UAVariable>  
+  </UAVariable>
 </UANodeSet>
