@@ -253,11 +253,17 @@ Service_GetEndpoints(UA_Server *server, UA_Session *session,
         return;
     }
 
-    /* Clone the endpoint for each networklayer? */
+    /* Clone the endpoint for each (real) networklayer? */
     size_t clone_times = 1;
     UA_Boolean nl_endpointurl = false;
     if(endpointUrl->length == 0) {
-        clone_times = server->config.networkLayersSize;
+        // XXX do not use our own network-like endpoints for DBus and MQ
+        clone_times = 0;
+        for(size_t i=0; i<server->config.networkLayersSize; ++i)
+        {
+            if (server->config.networkLayers[i].discoveryUrl.length > 0)
+                ++clone_times;
+        }
         nl_endpointurl = true;
     }
 
@@ -578,13 +584,13 @@ periodicServerRegister(UA_Server *server, void *data) {
     UA_StatusCode retval = UA_Client_connect_noSession(cb->client, server_url);
     if (retval == UA_STATUSCODE_GOOD) {
         /* Register
-		   You can also use a semaphore file. That file must exist. When the file is
-		   deleted, the server is automatically unregistered. The semaphore file has
-		   to be accessible by the discovery server
+           You can also use a semaphore file. That file must exist. When the file is
+           deleted, the server is automatically unregistered. The semaphore file has
+           to be accessible by the discovery server
 
-		   UA_StatusCode retval = UA_Server_register_discovery(server,
-		   "opc.tcp://localhost:4840", "/path/to/some/file");
-		*/
+           UA_StatusCode retval = UA_Server_register_discovery(server,
+           "opc.tcp://localhost:4840", "/path/to/some/file");
+        */
         retval = UA_Server_register_discovery(server, cb->client, NULL);
     }
     if (cb->client->state == UA_CLIENTSTATE_CONNECTED) {

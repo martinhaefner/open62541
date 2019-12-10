@@ -557,7 +557,28 @@ processMSG(UA_Server *server, UA_SecureChannel *channel,
      * layers only providing one send buffer, only one message context can be
      * initialized concurrently. */
     if(serviceType == UA_SERVICETYPE_NORMAL)
+    {
+        // XXX Siemens S7 client does not set the endpointurl, we set it to default
+        if (requestTypeId.identifier.numeric == UA_NS0ID_GETENDPOINTSREQUEST_ENCODING_DEFAULTBINARY)
+        {
+            UA_GetEndpointsRequest* rq = (UA_GetEndpointsRequest*)request;
+
+            if (rq->endpointUrl.length == 0)
+            {
+                // get endpoint from securechannels connection socket...
+                struct sockaddr_in addr;
+                socklen_t len = sizeof(addr);
+                char buf[64];
+
+                getsockname(channel->connection->sockfd, (struct sockaddr*)&addr, &len);
+                sprintf(buf, "opc.tcp://%s:4840", inet_ntoa(addr.sin_addr));
+
+                rq->endpointUrl = UA_String_fromChars(buf);
+            }
+        }
+
         service(server, session, request, response);
+    }
 
     /* Start the message */
     UA_NodeId typeId = UA_NODEID_NUMERIC(0, responseType->binaryEncodingId);
